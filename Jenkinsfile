@@ -14,9 +14,13 @@ node {
     def TEST_LEVEL= env.TEST_LEVEL
     def SF_INSTANCE_URL = env.SF_INSTANCE_URL ?: "https://login.salesforce.com"
 	
-    def DEPLOYMENT_TYPE=env.DEPLOYMENT_TYPE // Incremental Deployment = DELTA ; Full Deployment = FULL
-    def SF_SOURCE_COMMIT_ID=env.SOURCE_BRANCH
-    def SF_TARGET_COMMIT_ID=env.TARGET_BRANCH
+    //def DEPLOYMENT_TYPE=env.DEPLOYMENT_TYPE // Incremental Deployment = DELTA ; Full Deployment = FULL
+    //def SF_SOURCE_COMMIT_ID=env.SOURCE_BRANCH
+    //def SF_TARGET_COMMIT_ID=env.TARGET_BRANCH
+	
+    def DEPLOYMENT_TYPE= 'DELTA' // Incremental Deployment = DELTA ; Full Deployment = FULL
+    def SF_SOURCE_COMMIT_ID='a183bea2459ebb766aeaed287b516eacfd749059'
+    def SF_TARGET_COMMIT_ID='fb602c8073b9779a1fb592267ab341c44f3645d9'
     
     //Defining SFDX took kit path against toolbelt
     def toolbelt = tool 'toolbelt'
@@ -29,6 +33,7 @@ node {
     stage('checkout source') {
         checkout scm
     }
+	
 
 
     // -------------------------------------------------------------------------
@@ -41,46 +46,34 @@ node {
 	    withCredentials([file(credentialsId: SERVER_KEY_CREDENTIALS_ID, variable: 'server_key_file')]) {
 		// -------------------------------------------------------------------------
 		// Authenticate to Salesforce using the server key.
-		// Installing SF Powerkit Plugin
 		// -------------------------------------------------------------------------
 
-		stage('Authorize to Salesforce') {
-			rc = command "echo y | ${toolbelt}sfdx plugins:install sfpowerkit"
-      			if (isUnix()) 
-				{
-					rc = sh '${toolbelt}sfdx auth:jwt:grant --instanceurl ${SF_INSTANCE_URL} --clientid ${SF_CONSUMER_KEY} --jwtkeyfile ${server_key_file} --username ${SF_USERNAME} --setalias UAT'
-				}
-			else	
-				{
-	         			rc = command "${toolbelt}sfdx auth:jwt:grant --instanceurl ${SF_INSTANCE_URL} --clientid ${SF_CONSUMER_KEY} --jwtkeyfile ${server_key_file} --username ${SF_USERNAME} --setalias UAT"
-          			}
-		    	if [rc != 0]; 
-				{
-				error 'Salesforce org authorization failed.'
-		    		}
+		stage('Install Powerkit Plugin') {
+        		rc = command "echo y | ${toolbelt}sfdx plugins:install sfpowerkit"
+    		}
+		    
+		stage('Authorize Salesforce Org') {
+      			rc = command "${toolbelt}sfdx auth:jwt:grant --instanceurl ${SF_INSTANCE_URL} --clientid ${SF_CONSUMER_KEY} --jwtkeyfile ${server_key_file} --username ${SF_USERNAME} --setalias DEVHUB"
+			if (rc != 0) {
+    				error('Authorization Failed.')
+			}
 		}
 		 
 		// -------------------------------------------------------------------------
 		// Creating Delta Package with the changes.
 		// -------------------------------------------------------------------------
 
-		stage('Create_Delta_Package') {
-      			if (DEPLOYMENT_TYPE == 'DELTA'){	
-            			if (isUnix()) 
+		stage('Create Delta Package') {
+      			if (DEPLOYMENT_TYPE == 'DELTA'){
+				echo "Deploying DELTA Components from Repository"
+            				rc = command "${toolbelt}sfdx sfpowerkit:project:diff -d ${SF_DELTA_FOLDER} -r ${SF_SOURCE_COMMIT_ID} -t ${SF_TARGET_COMMIT_ID}"
+				if (rc != 0) 
 				{
-                			rc = sh "${toolbelt}sfdx sfpowerkit:project:diff -d ${SF_DELTA_FOLDER} -r ${SF_SOURCE_COMMIT_ID} -t ${SF_TARGET_COMMIT_ID}"
-            			}
-				else
-				{
-	         			rc = command "${toolbelt}sfdx sfpowerkit:project:diff -d ${SF_DELTA_FOLDER} -r ${SF_SOURCE_COMMIT_ID} -t ${SF_TARGET_COMMIT_ID}"
-            			}
-		    		if (rc != 0) 
-				{
-					error 'Delta Package Creation failed.'
-		    		}
+    					error('Delta Package Creation Failed.')
+				}
           		}
           		else{
-              			echo "Deployment is for All Components from Repository"
+              			echo "Deploying All Components from Repository"
           		}
 		}
 
@@ -88,33 +81,21 @@ node {
 		// Validating Stage.
 		// -------------------------------------------------------------------------
 
-		stage('Package_Validation') {
+		stage('Package Validation') {
       			if (DEPLOYMENT_TYPE == 'DELTA')
             		{
-            			if (isUnix()) 
-				{
-                			rc = sh "${toolbelt}sfdx force:source:deploy -c -p ${SF_DELTA_FOLDER}/${DEPLOYDIR} -u ${SF_USERNAME} -w 500 -l ${TEST_LEVEL}"
-            			}
-				else	
-				{
-	         			rc = command "${toolbelt}sfdx force:source:deploy -c -p ${SF_DELTA_FOLDER}/${DEPLOYDIR} -u ${SF_USERNAME} -w 500 -l ${TEST_LEVEL}"
-            			}
+            			rc = command "${toolbelt}sfdx force:source:deploy -c -p ${SF_DELTA_FOLDER}/${DEPLOYDIR} -u ${SF_USERNAME} -w 500 -l ${TEST_LEVEL}"
+				if (rc != 0) {
+    				error('Package Validation Failed.')
+				}
             		}
             		else
             		{
-            			if (isUnix()) 
-				{
-                			rc = sh "${toolbelt}sfdx force:source:deploy -c -p ${DEPLOYDIR} -u ${SF_USERNAME} -w 500 -l ${TEST_LEVEL}"
-            			}
-				else	
-				{
-	         			rc = command "${toolbelt}sfdx force:source:deploy -c -p ${DEPLOYDIR} -u ${SF_USERNAME} -w 500 -l ${TEST_LEVEL}"
-            			}
+            			rc = command "${toolbelt}sfdx force:source:deploy -c -p ${DEPLOYDIR} -u ${SF_USERNAME} -w 500 -l ${TEST_LEVEL}"
+				if (rc != 0) {
+    				error('Authorization Failed.')
+				}
             		}
-		    	if (rc != 0) 
-				{
-				error 'Component Validation Failed.'
-		    		}
         	}
 		    
 		// -------------------------------------------------------------------------
@@ -122,33 +103,21 @@ node {
 		// -------------------------------------------------------------------------
     
 		    
-		stage('Package_Deployment') {
+		stage('Package Deployment') {
       			if (DEPLOYMENT_TYPE == 'DELTA')
             		{
-            			if (isUnix()) 
-				{
-                			rc = sh "${toolbelt}sfdx force:source:deploy -p ${SF_DELTA_FOLDER}/${DEPLOYDIR} -u ${SF_USERNAME} -w 500 -l ${TEST_LEVEL}"
-            			}
-				else	
-				{
-	         			rc = command "${toolbelt}sfdx force:source:deploy -p ${SF_DELTA_FOLDER}/${DEPLOYDIR} -u ${SF_USERNAME} -w 500 -l ${TEST_LEVEL}"
-            			}
+            			rc = command "${toolbelt}sfdx force:source:deploy -p ${SF_DELTA_FOLDER}/${DEPLOYDIR} -u ${SF_USERNAME} -w 500 -l ${TEST_LEVEL}"
+				if (rc != 0) {
+    				error('Authorization Failed.')
+				}
             		}
             		else
             		{
-            			if (isUnix()) 
-				{
-                			rc = sh "${toolbelt}sfdx force:source:deploy -p ${DEPLOYDIR} -u ${SF_USERNAME} -w 500 -l ${TEST_LEVEL}"
-            			}
-				else	
-				{
-	         			rc = command "${toolbelt}sfdx force:source:deploy -p ${DEPLOYDIR} -u ${SF_USERNAME} -w 500 -l ${TEST_LEVEL}"
-            			}
+            			rc = command "${toolbelt}sfdx force:source:deploy -p ${DEPLOYDIR} -u ${SF_USERNAME} -w 500 -l ${TEST_LEVEL}"
+            			if (rc != 0) {
+    				error('Authorization Failed.')
+				}
             		}
-		    	if (rc != 0) 
-				{
-				error 'Component Validation Failed.'
-		    		}
         	}
 		    
 		// -------------------------------------------------------------------------
